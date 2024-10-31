@@ -1,0 +1,22 @@
+# Ignore build directories
+build/
+*.pro.user
+*.user
+*.autosave
+*.qmake.stash
+
+# Ignore compiled files
+*.o
+*.obj
+*.so
+*.dll
+*.exe
+*.out
+*.a
+*.lib
+*.app
+
+# Ignore QtCreator project-specific files
+*.pro.user
+*.user
+*.qmake.stash
