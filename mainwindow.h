@@ -40,5 +40,8 @@ private:
     void createChart();
 
     void updateChart(float newTemperature);
+
+    // Scan available Ports -> handshake -> if succeed -> connect
+    void serialPortScanner();
 };
 #endif // MAINWINDOW_H

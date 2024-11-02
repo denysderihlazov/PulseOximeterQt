@@ -11,9 +11,6 @@
 #include <QLayoutItem>
 #include <QValueAxis>
 
-
-// using namespace QtCharts;
-
 #include "stdlib.h"
 
 // Private variables
@@ -21,32 +18,19 @@ float temperature = 0;
 int bmp = 0;
 int spo2 = 0;
 
+bool isConnected = false; // waiting for handshake with PulseOximeter
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
     , serial(new QSerialPort(this)) // Init Serial Port
 {
     ui->setupUi(this);
-    createChart();
+    createChart(); // Init chart at the beginning
 
-    // Setup Serial port
-    serial->setPortName("COM15"); // +++ADD A FUNCTIONALITY TO AUTOMATICALLY SEARCH FOR PORT
+    serialPortScanner(); // Scan available Serial devices
 
-    serial->setBaudRate(QSerialPort::Baud115200);
-    serial->setDataBits(QSerialPort::Data8);
-    serial->setParity(QSerialPort::NoParity);
-    serial->setStopBits(QSerialPort::OneStop);
-    serial->setFlowControl(QSerialPort::NoFlowControl);
-
-    // Try to open COM port
-    if(serial->open(QIODevice::ReadWrite)) {
-        qDebug() << "COM port opened successfully";
-    } else {
-        qDebug() << "Failed to open COM port" << serial->errorString();
-    }
-
-    // Set ready read signal to ReadData slot
-    connect(serial, &QSerialPort::readyRead, this, &MainWindow::readData);
+    readData(); // test
 }
 
 
@@ -60,17 +44,33 @@ MainWindow::~MainWindow()
 
 
 void MainWindow::readData() {
-    // qDebug() << "Reading data from serial port...";
+    qDebug() << "Reading data from serial port...";
     static QByteArray dataBuffer;
 
     // Append new data to the buf
     QByteArray newData = serial->readAll();
+
     if (newData.isEmpty()) {
         qDebug() << "No data received from serial port!";
         return;
     }
 
     dataBuffer += newData;
+
+    // True only after handshake with PulseOximeter
+    if(isConnected) {
+        qDebug() << "===CONNECTED===";
+    }
+
+    if (!isConnected && dataBuffer.contains("PulseOximeter")) {
+        // ui->statusLabel->setText("Connected");
+        isConnected = true;
+        dataBuffer.clear(); // clear the buffer after succeed handshake
+        qDebug() << "Handshake successful. Device is connected.";
+        return;
+    }
+
+    qDebug() << dataBuffer; // test
 
     // Checking if the buffer has whole line (then finish on a new line)
     if (dataBuffer.contains('\n')) {
@@ -92,13 +92,14 @@ void MainWindow::readData() {
 
         // Save only last one line
         dataBuffer = lines.last();
+        qDebug() << dataBuffer;
     }
 }
 
 
 
 void MainWindow::SerialPortParser(const QString &dataParse, float *temperature, int *bmp, int *spo2) {
-    static QRegularExpression regex("T: ([\\d.]+), bpm: (\\d+), SPO2: (\\d+)");
+    static QRegularExpression regex("T: ([\\d.]+), bpm: (\\d+), SPO2: (\\d+)"); // I've used regex cause it's more saveful
     QRegularExpressionMatch match = regex.match(dataParse);
 
     if (match.hasMatch()) {
@@ -188,4 +189,53 @@ void MainWindow::updateChart(float newTemperature) {
     // Refreshing both axis
     chart->axes(Qt::Horizontal).first()->setRange(0, maxPoints - 1);
     chart->axes(Qt::Vertical).first()->setRange(25, 45);
+}
+
+void MainWindow::serialPortScanner() {
+
+    // Setup serial for handshake
+    serial->setBaudRate(QSerialPort::Baud115200);
+    serial->setDataBits(QSerialPort::Data8);
+    serial->setParity(QSerialPort::NoParity);
+    serial->setStopBits(QSerialPort::OneStop);
+    serial->setFlowControl(QSerialPort::NoFlowControl);
+
+    const auto serialPortInfos = QSerialPortInfo::availablePorts();
+    for (const QSerialPortInfo &portInfo : serialPortInfos) {
+        // qDebug() << "\n"
+        //          << "Port:" << portInfo.portName() << "\n"
+        //          << "Location:" << portInfo.systemLocation() << "\n"
+        //          << "Description:" << portInfo.description() << "\n"
+        //          << "Manufacturer:" << portInfo.manufacturer() << "\n"
+        //          << "Serial number:" << portInfo.serialNumber() << "\n"
+        //          << "Vendor Identifier:"
+        //          << (portInfo.hasVendorIdentifier()
+        //                  ? QByteArray::number(portInfo.vendorIdentifier(), 16)
+        //                  : QByteArray()) << "\n"
+        //          << "Product Identifier:"
+        //          << (portInfo.hasProductIdentifier()
+        //                  ? QByteArray::number(portInfo.productIdentifier(), 16)
+        //                  : QByteArray());
+
+        // Try each port
+        serial->setPortName(portInfo.portName());
+
+        // Try to open COM port
+        if(serial->open(QIODevice::ReadWrite)) {
+            qDebug() << "COM port opened successfully";
+        } else {
+            qDebug() << "Failed to open COM port" << serial->errorString();
+        }
+    }
+
+    // Set ready read signal to ReadData slot
+    connect(serial, &QSerialPort::readyRead, this, &MainWindow::readData);
+
+    if(serial->isOpen())
+    {
+        // Make handshake
+        qint64 bytesWritten = serial->write("Handshake!", 10);
+
+        qDebug() << "Found some device. Attempt to handshake...";
+    }
 }
