@@ -17,6 +17,8 @@
 float temperature = 0;
 int bmp = 0;
 int spo2 = 0;
+int currentIndex = 0; // variable for chart
+
 
 bool isConnected = false; // waiting for handshake with PulseOximeter
 
@@ -44,7 +46,7 @@ MainWindow::~MainWindow()
 
 
 void MainWindow::readData() {
-    qDebug() << "Reading data from serial port...";
+    // qDebug() << "Reading data from serial port..."; test
     static QByteArray dataBuffer;
 
     // Append new data to the buf
@@ -57,11 +59,6 @@ void MainWindow::readData() {
 
     dataBuffer += newData;
 
-    // True only after handshake with PulseOximeter
-    if(isConnected) {
-        qDebug() << "===CONNECTED===";
-    }
-
     if (!isConnected && dataBuffer.contains("PulseOximeter")) {
         // ui->statusLabel->setText("Connected");
         isConnected = true;
@@ -70,15 +67,13 @@ void MainWindow::readData() {
         return;
     }
 
-    qDebug() << dataBuffer; // test
-
     // Checking if the buffer has whole line (then finish on a new line)
     if (dataBuffer.contains('\n')) {
         QList<QByteArray> lines = dataBuffer.split('\n');
 
         // Handle each line from Serial UART
         for (int i = 0; i < lines.size() - 1; i++) {
-            qDebug() << "Received:" << lines[i].trimmed();
+            // qDebug() << "Received:" << lines[i].trimmed();
 
             // Parsing
             SerialPortParser(QString::fromUtf8(lines[i].trimmed()), &temperature, &bmp, &spo2);
@@ -92,10 +87,8 @@ void MainWindow::readData() {
 
         // Save only last one line
         dataBuffer = lines.last();
-        qDebug() << dataBuffer;
     }
 }
-
 
 
 void MainWindow::SerialPortParser(const QString &dataParse, float *temperature, int *bmp, int *spo2) {
@@ -125,6 +118,7 @@ void MainWindow::ShowTextData(float &temperature, int &bmp, int &spo2, QLabel *l
     label_spo2->setText(labelSpO2Text);
 }
 
+
 void MainWindow::createChart() {
     // Creating a new data for temp
     temperatureSeries = new QLineSeries();
@@ -133,7 +127,6 @@ void MainWindow::createChart() {
     chart = new QChart();
     chart->legend()->hide();
     chart->addSeries(temperatureSeries);
-    chart->createDefaultAxes();
     chart->setTitle("Temperature Data");
 
     // Creating QChartView for chart
@@ -148,15 +141,24 @@ void MainWindow::createChart() {
     axisX->setLabelFormat("%.1f");
     axisX->setTitleText("Time");
     axisX->setTitleBrush(Qt::white);
-    axisX->setLabelsBrush(Qt::white);
+    axisX->setLabelsColor(Qt::white);
+    axisX->setLinePen(QPen(Qt::white));
+    axisX->setGridLineColor(Qt::gray);
 
     QValueAxis *axisY = new QValueAxis();
     axisY->setRange(25, 45);
     axisY->setTitleText("Temperature (°C)");
     axisY->setTitleBrush(Qt::white);
-    axisY->setLabelsBrush(Qt::white);
+    axisY->setLabelsColor(Qt::white);
+    axisY->setLinePen(QPen(Qt::white));
+    axisY->setGridLineColor(Qt::gray);
 
+    chart->addAxis(axisX, Qt::AlignBottom);
+    chart->addAxis(axisY, Qt::AlignLeft);
 
+    // Connect data with axes
+    temperatureSeries->attachAxis(axisX);
+    temperatureSeries->attachAxis(axisY);
 
     if (ui->widget->layout() != nullptr) {
         QLayoutItem *item;
@@ -173,23 +175,39 @@ void MainWindow::createChart() {
 }
 
 
+
 void MainWindow::updateChart(float newTemperature) {
     // get current amount of points in a seria
     int pointCount = temperatureSeries->count();
 
+    // qDebug() << "Serial dots:";
+    // for (const QPointF &point : temperatureSeries->points()) {
+    //     qDebug() << "X:" << point.x() << ", Y:" << point.y();
+    // }
+
     // Max points count
     const int maxPoints = 25;
     if (pointCount >= maxPoints) {
-        temperatureSeries->removePoints(0, pointCount - maxPoints + 1);
+        temperatureSeries->remove(0);
     }
 
     // Adding a new point of temp every step
-    temperatureSeries->append(pointCount, newTemperature);
+    temperatureSeries->append(currentIndex, newTemperature);
+    currentIndex++;
 
     // Refreshing both axis
-    chart->axes(Qt::Horizontal).first()->setRange(0, maxPoints - 1);
-    chart->axes(Qt::Vertical).first()->setRange(25, 45);
+    QList<QAbstractAxis *> horizontalAxes = chart->axes(Qt::Horizontal);
+    QList<QAbstractAxis *> verticalAxes = chart->axes(Qt::Vertical);
+
+    QValueAxis *xAxis = qobject_cast<QValueAxis *>(horizontalAxes.first());
+    QValueAxis *yAxis = qobject_cast<QValueAxis *>(verticalAxes.first());
+
+    if (xAxis && yAxis) {
+        xAxis->setRange(currentIndex - maxPoints, currentIndex - 1);
+        yAxis->setRange(25, 45);
+    }
 }
+
 
 void MainWindow::serialPortScanner() {
 
@@ -220,6 +238,12 @@ void MainWindow::serialPortScanner() {
         // Try each port
         serial->setPortName(portInfo.portName());
 
+        // Close Serial port if it is already opened (to prevent blocked port)
+        if(serial->isOpen()) {
+            serial->close();
+            serial->clear(QSerialPort::AllDirections);
+        }
+
         // Try to open COM port
         if(serial->open(QIODevice::ReadWrite)) {
             qDebug() << "COM port opened successfully";
@@ -234,7 +258,7 @@ void MainWindow::serialPortScanner() {
     if(serial->isOpen())
     {
         // Make handshake
-        qint64 bytesWritten = serial->write("Handshake!", 10);
+        serial->write("Handshake!", 10);
 
         qDebug() << "Found some device. Attempt to handshake...";
     }
